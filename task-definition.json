@@ -1,0 +1,23 @@
+{
+  "family": "my-devops-app",
+  "networkMode": "awsvpc",
+  "containerDefinitions": [
+    {
+      "name": "my-python-app",
+      "image": "478879297370.dkr.ecr.eu-north-1.amazonaws.com/my-devops-app:latest",
+      "portMappings": [
+        {
+          "containerPort": 5000,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "memory": 512,
+      "cpu": 256
+    }
+  ],
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::478879297370:role/ecsTaskExecutionRole"
+}
