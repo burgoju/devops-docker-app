@@ -6,30 +6,130 @@ on:
 
 jobs:
   test:
+    name: Test Application
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
-    - name: Setup Python
+
+    - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
-        
+
     - name: Install dependencies
-      run: pip install -r requirements.txt
-      
+      run: |
+        pip install -r requirements.txt
+
     - name: Run tests
-      run: python -m pytest test_app.py -v
+      run: |
+        python -m pytest test_app.py -v
 
   build:
-    runs-on: ubuntu-latest
+    name: Build Docker Image
     needs: test
+    runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Build Docker image
-      run: docker build -t my-app .
+      run: |
+        docker build -t devops-app:latest .
+
+    - name: Test the built image
+      run: |
+        docker run -d --name test-container -p 5000:5000 devops-app:latest
+        sleep 10
+        curl -f http://localhost:5000/health || exit 1
+        docker stop test-container
+        docker rm test-container
+
+  deploy:
+    name: Deploy to EC2
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: eu-north-1
+
+    - name: Copy files to EC2
+      uses: appleboy/scp-action@v0.1.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ec2-user
+        key: ${{ secrets.EC2_SSH_KEY }}
+        source: "."
+        target: "/home/ec2-user/docker-app"
+
+    - name: Deploy on EC2
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ec2-user
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          echo "=== Starting CI/CD Deployment ==="
+          cd /home/ec2-user/docker-app
+          
+          # Make sure we have the latest code
+          git reset --hard HEAD
+          git pull origin main
+          
+          echo "1. Stopping old containers..."
+          docker stop devops-app || true
+          docker rm devops-app || true
+          
+          echo "2. Building new Docker image..."
+          docker build -t devops-app:latest .
+          
+          echo "3. Starting new container..."
+          docker run -d \
+            --name devops-app \
+            -p 5000:5000 \
+            -e ENVIRONMENT=production \
+            devops-app:latest
+          
+          echo "4. Waiting for container to start..."
+          sleep 10
+          
+          echo "5. Checking container status..."
+          docker ps
+          
+          echo "6. Testing application health..."
+          curl -f http://localhost:5000/health || echo "Health check failed!"
+          
+          echo "=== 🎉 DEPLOYMENT SUCCESSFUL ==="
+          echo "Your application is running at: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):5000"
+
+  notify:
+    name: Deployment Status
+    runs-on: ubuntu-latest
+    needs: [test, build, deploy]
+    if: always()
+    
+    steps:
+    - name: Success Notification
+      if: needs.deploy.result == 'success'
+      run: |
+        echo "🎉 CI/CD Pipeline Completed Successfully!"
+        echo "Your application is deployed and running"
+        echo "Access it at: http://${{ secrets.EC2_HOST }}:5000"
+        
+    - name: Failure Notification
+      if: needs.deploy.result == 'failure'
+      run: |
+        echo "❌ Pipeline Failed at step:"
+        echo "- Test: ${{ needs.test.result }}"
+        echo "- Build: ${{ needs.build.result }}"
+        echo "- Deploy: ${{ needs.deploy.result }}"
