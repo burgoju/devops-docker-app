@@ -9,11 +9,6 @@ services:
     environment:
       - ENVIRONMENT=development
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   nginx:
     image: nginx:alpine
@@ -24,5 +19,4 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf
     depends_on:
-      web:
-        condition: service_healthy
+      - web
